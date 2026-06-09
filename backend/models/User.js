@@ -17,8 +17,8 @@ const UserSchema = new mongoose.Schema({
   role: { 
     type: String, 
     required: true,
-    enum: ['user', 'organization'], // Assuming these are your two main roles
-    default: 'user'
+    enum: ['user', 'attendee', 'organization'], // Yahan 'attendee' add kar diya
+    default: 'attendee' // Default ko bhi 'attendee' kar diya hai
   },
   organizationName: { 
     type: String,
