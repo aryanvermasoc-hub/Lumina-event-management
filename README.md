@@ -30,6 +30,7 @@ c:\event-app\
 ├── backend/                      # Node.js + Express API Backend
 │   ├── models/                   # Mongoose schemas (e.g., User, Event, Booking)
 │   ├── routes/                   # Express routers (Auth, Events, Bookings)
+│   ├── clearData.js              # Utility script to clear MongoDB database
 │   ├── package.json              # Backend dependencies
 │   └── index.js                  # API entry point & DB connection
 ├── frontend/                     # React + Vite Frontend Application
@@ -37,12 +38,15 @@ c:\event-app\
 │   ├── src/                      # Source code
 │   │   ├── App.jsx               # Main React application & components
 │   │   ├── App.css               # Application layout & specific styles
+│   │   ├── ics.js                # iCalendar (.ics) generation utility
 │   │   ├── index.css             # Global design system, CSS variables & mobile media queries
 │   │   └── main.jsx              # React DOM render entry point
 │   ├── index.html                # Main HTML template
+│   ├── update_animations.js      # Utility script for CSS animation updates
 │   ├── vite.config.js            # Vite configuration
 │   └── package.json              # Frontend dependencies
 ├── .gitignore                    # Global git ignore file (protects .env)
+├── package.json                  # Root dependencies & workspace scripts
 └── README.md                     # Project documentation
 ```
 
