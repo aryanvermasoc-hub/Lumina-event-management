@@ -794,9 +794,20 @@ function App() {
                 ? 'Manage publishing, teams, tasks, activity, analytics, registrations, media, schedules, and approvals.'
                 : 'Browse upcoming events, track QR tickets, keep favorites, receive reminders, and manage your attendee profile.'}
             </motion.p>
-            {!isOrganization && (
+            {!isOrganization ? (
               <motion.div variants={{ hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0, transition: { type: 'spring', damping: 20 } } }} style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 40, padding: '0 16px' }}>
-              <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="primary-button inline" onClick={() => window.scrollTo({top: 600, behavior: 'smooth'})}>Explore Events</motion.button>
+                <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="primary-button inline" onClick={() => window.scrollTo({top: 600, behavior: 'smooth'})}>Explore Events</motion.button>
+              </motion.div>
+            ) : (
+              <motion.div variants={{ hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0, transition: { type: 'spring', damping: 20 } } }} style={{ display: 'flex', gap: 16, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 40, padding: '0 16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', background: 'var(--bg-surface)', border: '1px solid var(--glass-border)', borderRadius: 20, fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase' }}>
+                  <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-cyan)', boxShadow: '0 0 8px var(--accent-cyan)' }} />
+                  Secure Connection
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', background: 'var(--bg-surface)', border: '1px solid var(--glass-border)', borderRadius: 20, fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase' }}>
+                  <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-gold)', boxShadow: '0 0 8px var(--accent-gold)' }} />
+                  {isSuperAdmin ? 'Super Admin' : 'Admin'} Access
+                </div>
               </motion.div>
             )}
           </motion.div>
@@ -1088,7 +1099,7 @@ function AuthScreen({ accessType, authData, authMode, message, theme, onAccessCh
           </div>
           <h1 style={{ fontSize: 'clamp(1.8rem, 7vw, 2.5rem)', lineHeight: 1.12, marginBottom: 16, maxWidth: '100%', overflowWrap: 'break-word' }}>Event management for teams and guests.</h1>
           <p className="hero-copy" style={{ color: 'var(--text-muted)', marginBottom: 40 }}>Choose a dedicated user or organization entry, then sign in to the correct workspace.</p>
-          <div className="access-grid">
+          <div className="access-grid" style={{ display: 'grid', gap: '16px' }}>
             <button type="button" style={{ background: accessType === 'attendee' ? 'rgba(45, 212, 191, 0.1)' : 'transparent', border: `1px solid ${accessType === 'attendee' ? 'var(--accent-cyan)' : 'var(--glass-border)'}`, padding: 20, borderRadius: 16, textAlign: 'left', cursor: 'pointer', transition: 'all 0.3s' }} onClick={() => onAccessChange('attendee')}>
               <span style={{ display: 'block', fontWeight: 700, color: 'var(--text-main)', marginBottom: 8 }}>User Login / Signup</span>
               <strong style={{ display: 'block', fontWeight: 400, color: 'var(--text-muted)', fontSize: '0.9rem' }}>Book tickets, save favorites, view QR passes, and receive reminders.</strong>
@@ -1138,7 +1149,7 @@ function AuthScreen({ accessType, authData, authMode, message, theme, onAccessCh
               <span style={{ marginRight: 8, fontWeight: 'bold' }}>G</span> Continue with Google
             </motion.button>
             {authMode === 'login' && (
-              <button type="button" className="ghost-button small" style={{ border: 'none', background: 'transparent' }} onClick={() => window.alert('Password reset link sent to your email!')}>
+              <button type="button" className="ghost-button small" style={{ border: 'none', background: 'transparent' }} onClick={() => window.alert('This feature is currently not available')}>
                 Forgot your password?
               </button>
             )}
