@@ -6,11 +6,12 @@ require('dotenv').config();
 // Create the Express App
 const app = express();
 
-// --- MODIFIED: Middleware (Allows your phone and laptop to talk to this backend) ---
+// --- MODIFIED: Middleware (Allows your phone, laptop, and production app to talk to this backend) ---
 app.use(cors({
   origin: [
-    'http://localhost:5173',        // Allows your laptop
-    'http://192.168.29.84:5173'     // Allows your phone
+    'http://localhost:5173',                               // Allows your laptop local dev
+    'http://192.168.29.84:5173',                           // Allows your phone local dev
+    'https://lumina-event-management-b7u5.vercel.app'      // Allows your deployed Vercel frontend
   ],
   credentials: true,
 }));
