@@ -224,17 +224,6 @@ h2 {
   z-index: 2;
 }
 
-.attendee-workspace {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: 24px;
-  width: min(1180px, calc(100% - 40px));
-  margin: -64px auto 0;
-  padding-bottom: 56px;
-  position: relative;
-  z-index: 2;
-}
-
 .event-form,
 .event-board,
 .booking-panel {
@@ -625,7 +614,6 @@ textarea:focus {
 @media (max-width: 980px) {
   .hero-content,
   .workspace,
-  .attendee-workspace,
   .auth-panel {
     grid-template-columns: 1fr;
   }
@@ -634,8 +622,7 @@ textarea:focus {
     align-items: center;
   }
 
-  .workspace,
-  .attendee-workspace {
+  .workspace {
     margin-top: -34px;
   }
 
@@ -646,8 +633,7 @@ textarea:focus {
 
 @media (max-width: 640px) {
   .hero-content,
-  .workspace,
-  .attendee-workspace {
+  .workspace {
     width: min(100% - 28px, 1180px);
   }
 
@@ -856,15 +842,10 @@ textarea:focus {
 }
 
 .org-main,
-.attendee-main,
-.attendee-sidebar {
+.attendee-main {
   display: grid;
   gap: 24px;
   min-width: 0;
-}
-
-.attendee-workspace.enhanced {
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
 }
 
 .side-rail,

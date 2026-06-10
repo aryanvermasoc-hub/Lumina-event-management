@@ -1,141 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
+import { MockAPI, seedMockEventsOnce } from './mockApi.js'
+import { initialFormData, initialAuthData, initialAdminForm, categories, eventTypes, statuses, sortOptions } from './constants.js'
+import { readStorage, splitList, toDateInputValue, formatDate, formatCurrency, getCountdown, getInitials, slugify } from './helpers.js'
+import { exportICS, downloadPDF, downloadReportPDF } from './exportUtils.js'
+
 const LuxuryStyles = () => null
 
 const API_URL = `${import.meta.env.VITE_API_URL}/api`
 const AUTH_URL = `${import.meta.env.VITE_API_URL}/api/auth`
 const USE_SAMPLE_DATA = false
-
-// ─── Offline / mock storage helpers ───────────────────────
-function mockDb(key, fallback) {
-  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback } catch { return fallback }
-}
-function mockDbSet(key, value) {
-  try { localStorage.setItem(key, JSON.stringify(value)) } catch { return false }
-  return true
-}
-
-const MOCK_EVENTS_KEY  = 'lumina-mock-events'
-const MOCK_USERS_KEY   = 'lumina-mock-users'
-const MOCK_BOOKINGS_KEY = 'lumina-mock-bookings'
-
-function genId() { return 'mock-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7) }
-
-function seedMockEventsOnce() {}
-
-const MockAPI = {
-  login: function(email, password) {
-    var users = mockDb(MOCK_USERS_KEY, [])
-    var user = users.find(function(u) { return u.email.toLowerCase() === email.toLowerCase() && u.password === password })
-    if (!user) throw new Error('Invalid email or password.')
-    var safe = Object.assign({}, user)
-    delete safe.password
-    return safe
-  },
-  signup: function(data) {
-    var users = mockDb(MOCK_USERS_KEY, [])
-    if (users.find(function(u) { return u.email.toLowerCase() === data.email.toLowerCase() })) throw new Error('An account with this email already exists.')
-    var newUser = Object.assign({}, data, { _id: genId(), orgRole: data.role === 'organization' ? 'super-admin' : '' })
-    mockDbSet(MOCK_USERS_KEY, users.concat([newUser]))
-    var safe = Object.assign({}, newUser)
-    delete safe.password
-    return safe
-  },
-  getOrganizations: function() {
-    return mockDb(MOCK_USERS_KEY, []).filter(function(u) { return u.role === 'organization' })
-  },
-  getEvents: function() { return mockDb(MOCK_EVENTS_KEY, []) },
-  createEvent: function(payload) {
-    var events = mockDb(MOCK_EVENTS_KEY, [])
-    var ev = Object.assign({}, payload, { _id: genId(), ticketsSold: payload.ticketsSold || 0 })
-    mockDbSet(MOCK_EVENTS_KEY, events.concat([ev]))
-    return ev
-  },
-  updateEvent: function(id, payload) {
-    var events = mockDb(MOCK_EVENTS_KEY, [])
-    var updated = events.map(function(e) { return e._id === id ? Object.assign({}, e, payload, { _id: id }) : e })
-    mockDbSet(MOCK_EVENTS_KEY, updated)
-    return updated.find(function(e) { return e._id === id })
-  },
-  deleteEvent: function(id) {
-    var events = mockDb(MOCK_EVENTS_KEY, [])
-    mockDbSet(MOCK_EVENTS_KEY, events.filter(function(e) { return e._id !== id }))
-  },
-  bookEvent: function(eventId, userId, attendeeName, attendeeEmail, tickets, paymentMethod, transactionId) {
-    var events = mockDb(MOCK_EVENTS_KEY, [])
-    var event = events.find(function(e) { return e._id === eventId })
-    if (!event) throw new Error('Event not found.')
-    var seatsLeft = Number(event.totalCapacity || 0) - Number(event.ticketsSold || 0)
-    if (seatsLeft < tickets) throw new Error('Only ' + seatsLeft + ' seat(s) remaining.')
-    var updatedEvent = Object.assign({}, event, { ticketsSold: Number(event.ticketsSold || 0) + tickets })
-    mockDbSet(MOCK_EVENTS_KEY, events.map(function(e) { return e._id === eventId ? updatedEvent : e }))
-    var bookings = mockDb(MOCK_BOOKINGS_KEY, [])
-    var booking = { _id: genId(), eventId: updatedEvent, userId: userId, attendeeName: attendeeName, attendeeEmail: attendeeEmail, tickets: tickets, paymentStatus: Number(updatedEvent.ticketPrice || 0) > 0 ? (paymentMethod === 'Card' ? 'Paid' : 'Pending') : 'Free', paymentMethod: paymentMethod || 'Card', transactionId: transactionId || '', ticketCode: 'LUM-' + genId().slice(-6).toUpperCase(), createdAt: new Date().toISOString() }
-    mockDbSet(MOCK_BOOKINGS_KEY, bookings.concat([booking]))
-    return { event: updatedEvent, booking: booking }
-  },
-  getBookings: function(userId) {
-    return mockDb(MOCK_BOOKINGS_KEY, []).filter(function(b) { return b.userId === userId })
-  },
-  getAllBookings: function() {
-    return mockDb(MOCK_BOOKINGS_KEY, [])
-  },
-  updateBookingStatus: function(bookingId, status) {
-    var bookings = mockDb(MOCK_BOOKINGS_KEY, [])
-    var updated = bookings.map(function(b) { return b._id === bookingId ? Object.assign({}, b, { paymentStatus: status }) : b })
-    mockDbSet(MOCK_BOOKINGS_KEY, updated)
-    return updated.find(function(b) { return b._id === bookingId })
-  }
-}
-
-
-
-const initialFormData = {
-  title: '',
-  description: '',
-  date: '',
-  startTime: '',
-  endTime: '',
-  location: '',
-  category: 'Conference',
-  eventType: 'In person',
-  status: 'Published',
-  totalCapacity: '',
-  ticketPrice: '',
-  organizer: '',
-  contactEmail: '',
-  registrationDeadline: '',
-  imageUrl: '',
-  gallery: '',
-  videoUrl: '',
-  acceptedPaymentMethods: 'Card, UPI, Net Banking, Cash on Visit',
-  paymentInstructions: 'Add public payment instructions here. Do not publish personal UPI IDs or bank details.',
-}
-
-const initialAuthData = {
-  name: '',
-  email: '',
-  password: '',
-  organizationName: '',
-  role: 'attendee',
-}
-
-const initialAdminForm = {
-  name: '',
-  email: '',
-  password: '',
-  permission: 'Events',
-  orgRole: 'admin',
-}
-
-const categories = ['Conference', 'Workshop', 'Meetup', 'Concert', 'Festival', 'Webinar', 'Private']
-const eventTypes = ['In person', 'Virtual', 'Hybrid']
-const statuses = ['Planning', 'Published', 'Sold out', 'Completed']
-const sortOptions = [
-  { value: 'soonest', label: 'Soonest first' },
-  { value: 'capacity', label: 'Capacity' },
-  { value: 'title', label: 'Title' },
-]
 
 function App() {
   const [currentUser, setCurrentUser] = useState(() => readStorage('lumina-user', null))
@@ -443,6 +317,7 @@ function App() {
       setFavorites(readStorage(`lumina-favorites-${normalizedUser._id || normalizedUser.id}`, []))
       setNotifications(readStorage(`lumina-notifications-${normalizedUser._id || normalizedUser.id}`, []))
       setAuthData(initialAuthData)
+      setTimeout(() => window.scrollTo(0, 0), 0)
     } catch (error) {
       console.error("Auth Error:", error);
       setMessage(error.message === "Failed to fetch" ? "Could not connect to database." : error.message);
@@ -458,6 +333,7 @@ function App() {
     setMessage('')
     resetForm()
     setActiveTab('dashboard')
+    setTimeout(() => window.scrollTo(0, 0), 0)
   }
 
   const handleInputChange = (event) => {
@@ -783,28 +659,35 @@ function App() {
       />
 
       <section className="hero-section cinematic-hero" aria-label="Event dashboard overview">
-        <div className="hero-content" style={{ position: 'relative', zIndex: 1, maxWidth: '100%', margin: '0 auto' }}>
-          <motion.div initial="hidden" animate="show" variants={{ hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.1, delayChildren: 0.1 } } }}>
+        <div className="hero-content" style={{ position: 'relative', zIndex: 1, maxWidth: '100%', margin: '0 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+          <motion.div initial="hidden" animate="show" variants={{ hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.1, delayChildren: 0.1 } } }} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
             <motion.p variants={{ hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0, transition: { type: 'spring', damping: 20 } } }} className="eyebrow">{isOrganization ? `${isSuperAdmin ? 'Super Admin' : 'Admin'} Console` : 'User Event Portal'}</motion.p>
             <motion.h1 variants={{ hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0, transition: { type: 'spring', damping: 20 } } }} style={{ fontSize: 'clamp(2.5rem, 5vw, 4.5rem)', fontWeight: 800, letterSpacing: '-1px', marginBottom: 24, lineHeight: 1.1 }}>
               {isOrganization ? 'Run events with role-aware command.' : 'Discover, save, and book upcoming events.'}
             </motion.h1>
-            <motion.p variants={{ hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0, transition: { type: 'spring', damping: 20 } } }} className="hero-copy" style={{ fontSize: 'clamp(0.95rem, 2.5vw, 1.2rem)', color: 'var(--text-muted)', maxWidth: 600, margin: '0 auto 32px auto', lineHeight: 1.6, padding: '0 8px' }}>
+            <motion.p variants={{ hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0, transition: { type: 'spring', damping: 20 } } }} className="hero-copy" style={{ fontSize: 'clamp(0.95rem, 2.5vw, 1.2rem)', color: 'var(--text-muted)', maxWidth: 600, margin: '0 auto', lineHeight: 1.6, padding: '0', textAlign: 'center' }}>
             {isOrganization
                 ? 'Manage publishing, teams, tasks, activity, analytics, registrations, media, schedules, and approvals.'
                 : 'Browse upcoming events, track QR tickets, keep favorites, receive reminders, and manage your attendee profile.'}
             </motion.p>
             {!isOrganization ? (
-              <motion.div variants={{ hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0, transition: { type: 'spring', damping: 20 } } }} style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 40, padding: '0 16px' }}>
-                <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="primary-button inline" onClick={() => window.scrollTo({top: 600, behavior: 'smooth'})}>Explore Events</motion.button>
+              <motion.div variants={{ hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0, transition: { type: 'spring', damping: 20 } } }} style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 40, marginTop: 48 }}>
+                <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} className="primary-button inline" onClick={() => {
+                  const el = document.querySelector('.workspace')
+                  if (el) {
+                    window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 70, behavior: 'smooth' })
+                  } else {
+                    window.scrollTo({top: 600, behavior: 'smooth'})
+                  }
+                }}>Explore Events</motion.button>
               </motion.div>
             ) : (
-              <motion.div variants={{ hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0, transition: { type: 'spring', damping: 20 } } }} style={{ display: 'flex', gap: 16, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 40, padding: '0 16px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', background: 'var(--bg-surface)', border: '1px solid var(--glass-border)', borderRadius: 20, fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase' }}>
+              <motion.div variants={{ hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0, transition: { type: 'spring', damping: 20 } } }} style={{ display: 'flex', gap: 32, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 48, marginTop: 48 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 24px', background: 'var(--bg-surface)', border: '1px solid var(--glass-border)', borderRadius: 30, fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase' }}>
                   <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-cyan)', boxShadow: '0 0 8px var(--accent-cyan)' }} />
                   Secure Connection
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', background: 'var(--bg-surface)', border: '1px solid var(--glass-border)', borderRadius: 20, fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 24px', background: 'var(--bg-surface)', border: '1px solid var(--glass-border)', borderRadius: 30, fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase' }}>
                   <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-gold)', boxShadow: '0 0 8px var(--accent-gold)' }} />
                   {isSuperAdmin ? 'Super Admin' : 'Admin'} Access
                 </div>
@@ -813,7 +696,7 @@ function App() {
           </motion.div>
 
           {!isOrganization && organizations.length > 0 && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }} style={{ borderTop: '1px solid var(--glass-border)', paddingTop: 32, marginTop: 32 }}>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }} style={{ borderTop: '1px solid var(--glass-border)', paddingTop: 32, marginTop: 32, width: '100%', textAlign: 'center' }}>
               <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 2, marginBottom: 20 }}>Organizations hosting now</p>
               <div style={{ display: 'flex', gap: 40, justifyContent: 'center', flexWrap: 'wrap', opacity: 0.5, filter: 'grayscale(100%)' }}>
                 {[...organizations].sort((a, b) => b.events.length - a.events.length).slice(0, 5).map(org => (
@@ -824,10 +707,10 @@ function App() {
           )}
 
           {isOrganization && (
-          <motion.div className="hero-panel" initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
-            <motion.div className="stat-grid" variants={{ hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.1 } } }} initial="hidden" animate="show" aria-label="Event statistics" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginTop: 40 }}>
+          <motion.div className="hero-panel" initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} style={{ width: '100%' }}>
+            <motion.div className="stat-grid" variants={{ hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.1 } } }} initial="hidden" animate="show" aria-label="Event statistics" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginTop: 10 }}>
               {stats.map((item) => (
-                <motion.div className="stat-card glass-panel" key={item.label} variants={{ hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0 } }} whileHover={{ y: -5, scale: 1.02 }} style={{ padding: 24, borderRadius: 16, textAlign: 'left' }}>
+                <motion.div className="stat-card glass-panel" key={item.label} variants={{ hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0 } }} whileHover={{ y: -5, scale: 1.02 }} style={{ padding: 24, borderRadius: 16, textAlign: 'center' }}>
                   <span style={{ display: 'block', color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: 8 }}>{item.label}</span>
                   <strong style={{ fontSize: '2rem', color: 'var(--text-main)' }}>{item.value}</strong>
                 </motion.div>
@@ -1180,7 +1063,7 @@ function TopBar({ currentUser, theme, onLogout, onThemeToggle, onOpenProfile }) 
 
             <AnimatePresence>
               {showProfileMenu && (
-                <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2, ease: 'easeOut' }} className="glass-panel" style={{ position: 'absolute', top: 'calc(100% + 16px)', right: 0, width: '280px', borderRadius: '24px', padding: '0', overflow: 'hidden', zIndex: 200, boxShadow: '0 30px 60px -12px rgba(0,0,0,0.5)' }}>
+                <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2, ease: 'easeOut' }} className="glass-panel" style={{ position: 'absolute', top: 'calc(100% + 16px)', right: 0, width: '280px', borderRadius: '24px', padding: '0', overflow: 'hidden', zIndex: 200, boxShadow: '0 30px 60px -12px rgba(0,0,0,0.5)', background: 'var(--bg-panel-solid)' }}>
                   <div style={{ padding: '24px', borderBottom: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', background: 'var(--bg-surface)' }}>
                     <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'linear-gradient(135deg, var(--accent-cyan), #3b82f6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem', fontWeight: 800, color: '#fff', marginBottom: 12 }}>
                       {getInitials(currentUser.name)}
@@ -1225,7 +1108,13 @@ function OrganizationWorkspace(props) {
     key={tab.id}
     className={activeTab === tab.id ? 'active' : ''}
     style={{ cursor: 'pointer', padding: '10px 16px', borderRadius: 8, background: activeTab === tab.id ? 'rgba(45, 212, 191, 0.1)' : 'transparent', color: activeTab === tab.id ? 'var(--accent-cyan)' : 'var(--text-muted)', fontWeight: activeTab === tab.id ? 700 : 500, transition: 'all 0.3s', display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}
-    onClick={() => onTabChange(tab.id)}
+    onClick={() => {
+      onTabChange(tab.id)
+      if (window.innerWidth <= 980) {
+        const el = document.querySelector('.workspace')
+        if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 70, behavior: 'smooth' })
+      }
+    }}
   >
     <span>{tab.icon}</span>
     <span>{tab.label}</span>
@@ -1293,7 +1182,7 @@ function OrgDashboard({ admins, events, isSuperAdmin, revenue, tasks, onAddAdmin
       <div className="dashboard-grid" style={{ gap: 32, marginBottom: 32 }}>
         <motion.div className="analytics-card glass-panel" initial={{ opacity: 0, y: 10 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.3, ease: 'easeOut' }} style={{ padding: 'clamp(16px, 4vw, 32px)' }}>
           <h3 style={{ marginBottom: 24 }}>Upcoming Events Timeline</h3>
-          <div style={{ display: 'flex', gap: 16, overflowX: 'auto', paddingBottom: 16 }}>
+          <div style={{ display: 'flex', gap: 16, overflowX: 'auto', paddingBottom: 16, scrollbarWidth: 'none', msOverflowStyle: 'none' }} className="hide-scrollbar">
             {events.filter(e => new Date(e.date) > new Date()).sort((a,b) => new Date(a.date) - new Date(b.date)).slice(0, 6).map(event => (
               <motion.div key={event._id} whileHover={{ y: -5 }} style={{ minWidth: 250, maxWidth: 300, padding: 16, background: 'var(--bg-surface)', borderRadius: 12, borderLeft: `4px solid var(--accent-cyan)` }}>
                 <small style={{ color: 'var(--accent-cyan)', fontWeight: 'bold' }}>{formatDate(event.date)}</small>
@@ -1389,13 +1278,13 @@ function AdminsTab({ admins, onAddAdmin, onAdminStatus, onDeleteAdmin }) {
           <tbody>
             {filtered.map((admin) => (
               <tr key={admin.id} style={{ borderBottom: '1px solid var(--glass-border)' }}>
-                <td style={{ padding: '16px 20px', fontWeight: 700, color: 'var(--text-main)' }}>{admin.name}</td>
-                <td style={{ padding: '16px 20px', color: 'var(--text-muted)' }}>{admin.email}</td>
-                <td style={{ padding: '16px 20px', color: 'var(--text-muted)' }}>{admin.orgRole || 'admin'}</td>
-                <td style={{ padding: '16px 20px' }}><span className="category-pill" style={{ fontSize: '0.75rem', background: 'var(--bg-element-active)', padding: '4px 10px', borderRadius: 20 }}>{admin.permission}</span></td>
-                <td style={{ padding: '16px 20px' }}><span className={`status-chip ${admin.status.toLowerCase()}`}>{admin.status}</span></td>
-                <td style={{ padding: '16px 20px', color: 'var(--text-muted)' }}>{admin.completed}/{admin.tasks}</td>
-                <td style={{ padding: '16px 20px' }}>
+                <td data-label="Name" style={{ padding: '16px 20px', fontWeight: 700, color: 'var(--text-main)' }}>{admin.name}</td>
+                <td data-label="Email" style={{ padding: '16px 20px', color: 'var(--text-muted)' }}>{admin.email}</td>
+                <td data-label="Role" style={{ padding: '16px 20px', color: 'var(--text-muted)' }}>{admin.orgRole || 'admin'}</td>
+                <td data-label="Permission" style={{ padding: '16px 20px' }}><span className="category-pill" style={{ fontSize: '0.75rem', background: 'var(--bg-element-active)', padding: '4px 10px', borderRadius: 20 }}>{admin.permission}</span></td>
+                <td data-label="Status" style={{ padding: '16px 20px' }}><span className={`status-chip ${admin.status.toLowerCase()}`}>{admin.status}</span></td>
+                <td data-label="Tasks" style={{ padding: '16px 20px', color: 'var(--text-muted)' }}>{admin.completed}/{admin.tasks}</td>
+                <td data-label="Actions" style={{ padding: '16px 20px' }}>
                   <div style={{ display: 'flex', gap: 6 }}>
                     <button className="ghost-button small" type="button" onClick={() => onAdminStatus(admin.id, admin.status === 'Active' ? 'Suspended' : 'Active')} style={{ fontSize: '0.78rem', minHeight: 30 }}>
                       {admin.status === 'Active' ? 'Suspend' : 'Activate'}
@@ -1454,12 +1343,12 @@ function RegistrationsTab({ events, bookings = [], onUpdateBookingStatus }) {
           <tbody>
             {events.map((event) => (
               <tr key={event._id} style={{ borderBottom: '1px solid var(--glass-border)' }}>
-                <td style={{ padding: '16px 20px', fontWeight: 700, color: 'var(--text-main)' }}>{event.title}</td>
-                <td style={{ padding: '16px 20px', color: 'var(--text-muted)' }}>{formatDate(event.date)}</td>
-                <td style={{ padding: '16px 20px', color: 'var(--accent-cyan)', fontWeight: 700 }}>{event.ticketsSold || 0}</td>
-                <td style={{ padding: '16px 20px', color: 'var(--text-muted)' }}>{event.totalCapacity || '—'}</td>
-                <td style={{ padding: '16px 20px', color: 'var(--text-main)', fontWeight: 700 }}>{formatCurrency(Number(event.ticketPrice || 0) * Number(event.ticketsSold || 0))}</td>
-                <td style={{ padding: '16px 20px' }}><span className={`status-chip ${slugify(event.status || 'planning')}`}>{event.status || 'Planning'}</span></td>
+                <td data-label="Event" style={{ padding: '16px 20px', fontWeight: 700, color: 'var(--text-main)' }}>{event.title}</td>
+                <td data-label="Date" style={{ padding: '16px 20px', color: 'var(--text-muted)' }}>{formatDate(event.date)}</td>
+                <td data-label="Tickets sold" style={{ padding: '16px 20px', color: 'var(--accent-cyan)', fontWeight: 700 }}>{event.ticketsSold || 0}</td>
+                <td data-label="Capacity" style={{ padding: '16px 20px', color: 'var(--text-muted)' }}>{event.totalCapacity || '—'}</td>
+                <td data-label="Revenue" style={{ padding: '16px 20px', color: 'var(--text-main)', fontWeight: 700 }}>{formatCurrency(Number(event.ticketPrice || 0) * Number(event.ticketsSold || 0))}</td>
+                <td data-label="Status" style={{ padding: '16px 20px' }}><span className={`status-chip ${slugify(event.status || 'planning')}`}>{event.status || 'Planning'}</span></td>
               </tr>
             ))}
             {events.length === 0 && (
@@ -1493,27 +1382,27 @@ function RegistrationsTab({ events, bookings = [], onUpdateBookingStatus }) {
               const isPending = b.paymentStatus === 'Pending';
               return (
               <tr key={b._id} style={{ background: 'var(--bg-surface)', boxShadow: isPending ? 'inset 3px 0 0 var(--warning)' : 'inset 3px 0 0 var(--success)', transition: 'transform 0.2s' }}>
-                <td style={{ padding: '16px 20px', borderRadius: '12px 0 0 12px' }}>
+                <td data-label="Attendee" style={{ padding: '16px 20px', borderRadius: '12px 0 0 12px' }}>
                   <strong style={{ display: 'block', color: 'var(--text-main)' }}>{b.attendeeName}</strong>
                   <small style={{ color: 'var(--text-muted)' }}>{b.attendeeEmail}</small>
                 </td>
-                <td style={{ padding: '16px 20px' }}>
+                <td data-label="Event" style={{ padding: '16px 20px' }}>
                   <span className="truncate" style={{ display: 'block', maxWidth: 200 }}>{event?.title || 'Unknown Event'}</span>
                 </td>
-                <td style={{ padding: '16px 20px' }}>
+                <td data-label="Tickets" style={{ padding: '16px 20px' }}>
                   <span style={{ background: 'var(--bg-element-active)', color: 'var(--accent-cyan)', padding: '4px 10px', borderRadius: 20, fontWeight: 700, fontSize: '0.8rem' }}>{b.tickets}</span>
                 </td>
-                <td style={{ padding: '16px 20px', fontWeight: 700 }}>{formatCurrency(amount)}</td>
-                <td style={{ padding: '16px 20px' }}>
+                <td data-label="Amount" style={{ padding: '16px 20px', fontWeight: 700 }}>{formatCurrency(amount)}</td>
+                <td data-label="Payment Info" style={{ padding: '16px 20px' }}>
                   <span style={{ display: 'block', color: 'var(--text-main)', fontSize: '0.85rem', marginBottom: 4 }}>{b.paymentMethod || 'Card'}</span>
                   {b.transactionId && !String(b.paymentMethod || '').includes(b.transactionId) && <code style={{ background: 'var(--bg-element)', padding: '2px 6px', borderRadius: 4, fontSize: '0.75rem', color: 'var(--text-muted)' }}>ID: {b.transactionId}</code>}
                 </td>
-                <td style={{ padding: '16px 20px' }}>
+                <td data-label="Status" style={{ padding: '16px 20px' }}>
                   <span className={`status-chip ${isPending ? 'planning' : 'published'}`} style={{ border: isPending ? '1px solid var(--warning)' : (b.paymentStatus === 'Rejected' ? '1px solid var(--danger)' : '1px solid var(--success)'), color: isPending ? 'var(--warning)' : (b.paymentStatus === 'Rejected' ? 'var(--danger)' : 'var(--success)'), background: 'transparent' }}>
                     {isPending ? 'Pending Review' : (b.paymentStatus === 'Rejected' ? 'Rejected' : 'Verified')}
                   </span>
                 </td>
-                <td style={{ padding: '16px 20px', borderRadius: '0 12px 12px 0' }}>
+                <td data-label="Action" style={{ padding: '16px 20px', borderRadius: '0 12px 12px 0' }}>
                    {isPending && (
                      <div style={{ display: 'flex', gap: 8 }}>
                         <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} className="ghost-button small" title="Approve" style={{ fontSize: '0.8rem', padding: '6px 12px', minHeight: '32px', background: 'rgba(16, 185, 129, 0.1)', color: 'var(--success)', border: '1px solid rgba(16, 185, 129, 0.3)', display: 'flex', alignItems: 'center', gap: 6 }} onClick={() => onUpdateBookingStatus(b._id, 'Paid')}><span style={{ fontSize: '0.9rem' }}>✓</span> Approve</motion.button>
@@ -1596,18 +1485,52 @@ function ReportsTab({ events, admins, tasks, revenue }) {
 }
 
 function AttendeeWorkspace(props) {
+  const [activeTab, setActiveTab] = useState('home');
   const favoriteEvents = props.events.filter((event) => props.favorites.includes(event._id || event.id))
+  
   return (
-    <section className="attendee-workspace enhanced">
-      <div className="attendee-main">
-        <EventBoard {...props} mode="attendee" />
-        <OrganizationDirectory organizations={props.organizations} searchTerm={props.searchTerm} />
-        <FavoriteStrip events={favoriteEvents} />
-      </div>
-      <aside className="attendee-sidebar">
-        <BookingPanel bookings={props.bookings} />
-        <NotificationPanel notifications={props.notifications} onMarkRead={props.onMarkNotifsRead} onClear={props.onClearNotifs} />
+    <section className="workspace organization-layout">
+      <aside className="side-rail">
+        <strong>Menu</strong>
+        {[
+          { id: 'home', label: 'Discover', icon: '🏠' },
+          { id: 'tickets', label: 'My Tickets', icon: '🎟️' },
+          { id: 'notifications', label: 'Notifications', icon: '🔔' },
+        ].map((tab) => (
+          <motion.span
+            whileHover={{ x: 4 }}
+            key={tab.id}
+            className={activeTab === tab.id ? 'active' : ''}
+            style={{ cursor: 'pointer', padding: '10px 16px', borderRadius: 8, background: activeTab === tab.id ? 'rgba(45, 212, 191, 0.1)' : 'transparent', color: activeTab === tab.id ? 'var(--accent-cyan)' : 'var(--text-muted)', fontWeight: activeTab === tab.id ? 700 : 500, transition: 'all 0.3s', display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}
+            onClick={() => {
+              setActiveTab(tab.id)
+              if (window.innerWidth <= 980) {
+                const el = document.querySelector('.workspace')
+                if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 70, behavior: 'smooth' })
+              }
+            }}
+          >
+            <span style={{ fontSize: '1.2rem', display: 'grid', placeItems: 'center', width: 24, height: 24 }}>{tab.icon}</span>
+            <span>{tab.label}</span>
+            {tab.id === 'notifications' && props.notifications.filter(n => n.unread).length > 0 && (
+              <span style={{ marginLeft: 'auto', background: 'var(--danger)', color: '#fff', borderRadius: '10px', padding: '2px 6px', fontSize: '0.7rem' }}>
+                {props.notifications.filter(n => n.unread).length}
+              </span>
+            )}
+          </motion.span>
+        ))}
       </aside>
+      <div className="attendee-main" style={{ width: '100%', minWidth: 0 }}>
+        {activeTab === 'home' && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
+            <EventBoard {...props} mode="attendee" />
+            <OrganizationDirectory organizations={props.organizations} searchTerm={props.searchTerm} />
+            <FavoriteStrip events={favoriteEvents} />
+          </motion.div>
+        )}
+        {activeTab === 'tickets' && <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}><BookingPanel bookings={props.bookings} /></motion.div>}
+        {activeTab === 'notifications' && <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}><NotificationPanel notifications={props.notifications} onMarkRead={props.onMarkNotifsRead} onClear={props.onClearNotifs} /></motion.div>}
+      </div>
     </section>
   )
 }
@@ -1862,7 +1785,7 @@ function BookingPanel({ bookings }) {
   const past = bookings.filter(b => b.eventId?.date && new Date(b.eventId.date) < now);
 
   return (
-    <motion.aside className="booking-panel glass-panel" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2, ease: 'easeOut' }} style={{ padding: 'clamp(16px, 4vw, 24px)', borderRadius: 'clamp(16px, 4vw, 20px)' }}>
+    <motion.section className="booking-panel glass-panel" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2, ease: 'easeOut' }} style={{ padding: 'clamp(16px, 4vw, 24px)', borderRadius: 'clamp(16px, 4vw, 20px)' }}>
       <div className="section-heading" style={{ marginBottom: 24 }}><div><p className="eyebrow">My Tickets</p><h2 style={{ fontSize: '1.25rem' }}>Booking history</h2></div></div>
       {bookings.length === 0 ? (
         <div className="empty-state compact-empty" style={{ padding: 32, textAlign: 'center', background: 'var(--bg-surface)', borderRadius: 12, border: '1px dashed var(--glass-border)' }}><strong style={{ display: 'block', marginBottom: 8 }}>No bookings yet.</strong><span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>Book an event to see QR ticket details.</span></div>
@@ -1931,7 +1854,7 @@ function BookingPanel({ bookings }) {
           )})}
         </div>
       )}
-    </motion.aside>
+    </motion.section>
   )
 }
 
@@ -1948,7 +1871,7 @@ function FavoriteStrip({ events }) {
 
 function NotificationPanel({ notifications, onMarkRead, onClear }) {
   return (
-    <motion.aside className="booking-panel glass-panel" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2, ease: 'easeOut' }} style={{ padding: 'clamp(16px, 4vw, 24px)', borderRadius: 'clamp(16px, 4vw, 20px)' }}>
+    <motion.section className="booking-panel glass-panel" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2, ease: 'easeOut' }} style={{ padding: 'clamp(16px, 4vw, 24px)', borderRadius: 'clamp(16px, 4vw, 20px)' }}>
       <div className="mini-heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <h3 style={{ margin: 0, fontSize: '1.1rem' }}>Notifications</h3>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -1968,7 +1891,7 @@ function NotificationPanel({ notifications, onMarkRead, onClear }) {
           </article>
         ))}
       </div>
-    </motion.aside>
+    </motion.section>
   )
 }
 
@@ -2029,378 +1952,6 @@ function pushNotificationToUser(userId, title, body) {
   const current = readStorage(key, [])
   const next = [{ id: `n-${Date.now()}`, title, body, unread: true }, ...current].slice(0, 50)
   localStorage.setItem(key, JSON.stringify(next))
-}
-
-function readStorage(key, fallback) {
-  try {
-    const value = localStorage.getItem(key)
-    return value ? JSON.parse(value) : fallback
-  } catch {
-    return fallback
-  }
-}
-
-function splitList(value) {
-  return String(value || '').split(',').map((item) => item.trim()).filter(Boolean)
-}
-
-function toDateInputValue(value) {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  return date.toISOString().slice(0, 10)
-}
-
-function formatDate(value) {
-  if (!value) return 'Date pending'
-  return new Date(value).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
-}
-
-function formatCurrency(value) {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(value)
-}
-
-function getCountdown(value) {
-  if (!value) return 'TBA'
-  const days = Math.ceil((new Date(value).getTime() - Date.now()) / 86400000)
-  if (days < 0) return 'Completed'
-  if (days === 0) return 'Today'
-  return `${days} days`
-}
-
-function getInitials(value = 'Event') {
-  return value.split(' ').filter(Boolean).slice(0, 2).map((word) => word[0]).join('').toUpperCase()
-}
-
-function slugify(value) {
-  return String(value).toLowerCase().replace(/\s+/g, '-')
-}
-
-function exportICS(booking) {
-  const event = booking.eventId
-  if (!event || !event.date) {
-    window.alert('No valid date available to export.')
-    return
-  }
-  
-  let startStr;
-  let endStr;
-  
-  if (event.startTime) {
-    const [hours, minutes] = event.startTime.split(':');
-    const d = new Date(event.date);
-    d.setHours(parseInt(hours, 10), parseInt(minutes, 10), 0, 0);
-    startStr = d.toISOString();
-  } else {
-    startStr = new Date(event.date).toISOString();
-  }
-
-  if (event.endTime) {
-    const [hours, minutes] = event.endTime.split(':');
-    const d = new Date(event.date);
-    d.setHours(parseInt(hours, 10), parseInt(minutes, 10), 0, 0);
-    endStr = d.toISOString();
-  } else {
-    const d = new Date(event.date);
-    d.setHours(d.getHours() + 1);
-    endStr = d.toISOString();
-  }
-  
-  const formatICSDate = (isoStr) => isoStr.replace(/[-:]/g, '').split('.')[0] + 'Z';
-  const startICS = formatICSDate(startStr);
-  const endICS = formatICSDate(endStr);
-  const nowICS = formatICSDate(new Date().toISOString());
-
-  const organizerEmail = event.contactEmail || 'noreply@lumina.events';
-  const organizerName = event.organizer || event.hostName || 'Event Host';
-  const ticketCode = booking.ticketCode || `LUM-${String(booking._id).slice(-6)}`;
-  const safeDescription = `Ticket Code: ${ticketCode}\\n\\n${(event.description || '').replace(/\n/g, '\\n').replace(/,/g, '\\,')}`;
-
-  const icsContent = [
-    'BEGIN:VCALENDAR',
-    'VERSION:2.0',
-    'PRODID:-//Lumina Events//EN',
-    'CALSCALE:GREGORIAN',
-    'METHOD:REQUEST',
-    'BEGIN:VEVENT',
-    `UID:${booking._id}@lumina.events`,
-    `DTSTAMP:${nowICS}`,
-    `DTSTART:${startICS}`,
-    `DTEND:${endICS}`,
-    `SUMMARY:${event.title}`,
-    `DESCRIPTION:${safeDescription}`,
-    `LOCATION:${event.location || ''}`,
-    `ORGANIZER;CN="${organizerName}":mailto:${organizerEmail}`,
-    `STATUS:CONFIRMED`,
-    event.videoUrl ? `URL:${event.videoUrl}` : '',
-    'END:VEVENT',
-    'END:VCALENDAR'
-  ].filter(Boolean).join('\r\n');
-  
-  const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
-  const url = window.URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.setAttribute('download', `event-${booking._id}.ics`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-}
-
-function downloadPDF(booking) {
-  const event = booking.eventId;
-  if (!event) return;
-  const ticketCode = booking.ticketCode || `LUM-${String(booking._id).slice(-6)}`;
-  const orderDate = booking.createdAt ? formatDate(booking.createdAt) : formatDate(new Date().toISOString());
-  const ticketPrice = Number(event.ticketPrice || 0);
-  const totalAmount = ticketPrice * booking.tickets;
-  const priceDisplay = ticketPrice > 0 ? formatCurrency(ticketPrice) : 'Free';
-  const totalDisplay = ticketPrice > 0 ? formatCurrency(totalAmount) : 'Free';
-
-  const qrData = JSON.stringify({
-    code: ticketCode,
-    event: event.title || 'Event',
-    name: booking.attendeeName,
-    tickets: booking.tickets,
-    status: booking.paymentStatus || 'Paid'
-  });
-
-  const html = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <title>Ticket - ${event.title}</title>
-        <style>
-          body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #111827; padding: 40px; margin: 0; background: #f6f8fb; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          .ticket-container { max-width: 700px; margin: 0 auto; }
-          .ticket { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.05); }
-          .header { background: #0f172a; color: #fff; padding: 32px; text-align: center; position: relative; }
-          .header h1 { margin: 0 0 12px 0; font-size: 28px; letter-spacing: -0.5px; }
-              .header p { margin: 0; font-size: 16px; color: #cbd5e1; }
-              .category-badge { position: absolute; top: 16px; right: 16px; background: rgba(255,255,255,0.15); padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; color: #7dd3fc; }
-          .body { padding: 32px; display: flex; flex-wrap: wrap; gap: 24px; border-bottom: 2px dashed #e2e8f0; }
-          .details { flex: 2; min-width: 300px; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-          .detail-item { margin-bottom: 8px; }
-          .detail-item strong { display: block; font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
-          .detail-item span { display: block; font-size: 15px; font-weight: 600; color: #0f172a; }
-          .qr-section { flex: 1; min-width: 150px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #f8fafc; padding: 24px; border-radius: 12px; border: 1px solid #e2e8f0; }
-          .qr-placeholder { width: 120px; height: 120px; background: #fff; display: flex; align-items: center; justify-content: center; border-radius: 8px; border: 2px solid #cbd5e1; margin-bottom: 16px; box-shadow: inset 0 0 10px rgba(0,0,0,0.05); overflow: hidden; }
-          .ticket-code { font-family: 'Courier New', Courier, monospace; font-size: 16px; font-weight: bold; background: #e2e8f0; padding: 8px 16px; border-radius: 6px; letter-spacing: 2px; }
-          .payment-info { padding: 24px 32px; background: #f8fafc; display: flex; justify-content: space-between; align-items: center; }
-          .payment-info div { display: flex; flex-direction: column; }
-          .payment-info strong { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
-          .payment-info span { font-size: 16px; font-weight: 600; color: #0f172a; }
-          .payment-info .total { text-align: right; }
-          .payment-info .total span { font-size: 20px; color: #14b8a6; }
-          .footer { background: #fff; padding: 24px; text-align: center; font-size: 13px; color: #64748b; border-top: 1px solid #e2e8f0; line-height: 1.6; }
-          .footer strong { color: #0f172a; }
-          @media print {
-            body { background: #fff; padding: 0; }
-            .ticket { box-shadow: none; border: 1px solid #cbd5e1; max-width: 100%; }
-            .no-print { display: none !important; }
-          }
-        </style>
-      </head>
-      <body>
-        <div class="ticket-container">
-         <div class="ticket" id="ticket-content">
-          <div class="header">
-            <div class="category-badge">${event.category || 'Event'}</div>
-            <h1>${event.title}</h1>
-            <p>${formatDate(event.date)} ${event.startTime ? 'at ' + event.startTime : ''} ${event.endTime ? '- ' + event.endTime : ''}</p>
-          </div>
-          <div class="body">
-            <div class="details">
-              <div class="detail-item">
-                <strong>Attendee Name</strong>
-                <span>${booking.attendeeName}</span>
-              </div>
-              <div class="detail-item">
-                <strong>Attendee Email</strong>
-                <span>${booking.attendeeEmail}</span>
-              </div>
-              <div class="detail-item" style="grid-column: 1 / -1;">
-                <strong>Venue / Location</strong>
-                <span>${event.location || 'To be announced'}</span>
-              </div>
-              <div class="detail-item">
-                <strong>Event Format</strong>
-                <span>${event.eventType || 'In person'}</span>
-              </div>
-              <div class="detail-item">
-                <strong>Order Date</strong>
-                <span>${orderDate}</span>
-              </div>
-              <div class="detail-item" style="grid-column: 1 / -1; margin-top: 8px;">
-                <strong>Event Description</strong>
-                <span style="font-weight: normal; font-size: 13px; line-height: 1.5; color: #475569;">${event.description || 'No description provided.'}</span>
-              </div>
-            </div>
-            <div class="qr-section">
-              <div class="qr-placeholder">
-                <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(qrData)}" alt="QR Code" style="width: 100%; height: 100%; object-fit: contain;" crossorigin="anonymous" />
-              </div>
-              <div class="ticket-code">${ticketCode}</div>
-            </div>
-          </div>
-          <div class="payment-info">
-            <div>
-              <strong>Order ID</strong>
-              <span>${booking._id}</span>
-            </div>
-            <div>
-              <strong>Tickets</strong>
-              <span>${booking.tickets} x ${priceDisplay}</span>
-            </div>
-            <div>
-              <strong>Payment Status</strong>
-              <span>${booking.paymentStatus || 'Paid'} ${booking.paymentMethod ? `(${booking.paymentMethod})` : ''}</span>
-            </div>
-            ${booking.transactionId ? `
-            <div>
-              <strong>Transaction ID</strong>
-              <span>${booking.transactionId}</span>
-            </div>
-            ` : ''}
-            <div class="total">
-              <strong>Total Amount</strong>
-              <span>${totalDisplay}</span>
-            </div>
-          </div>
-          <div class="footer">
-            Please present this ticket (digital or printed) at the entrance.<br/>
-            Organized by <strong>${event.organizer || event.hostName || 'Event Host'}</strong><br/>
-            Need help? Contact <a href="mailto:${event.contactEmail}" style="color: #14b8a6; text-decoration: none;">${event.contactEmail || 'Support'}</a>
-          </div>
-         </div>
-         <div class="no-print" style="text-align: center; margin-top: 32px;">
-           <button onclick="window.print()" style="padding: 12px 24px; font-size: 14px; margin-right: 12px; cursor: pointer; border: none; background: #14b8a6; color: #fff; border-radius: 8px; font-weight: bold;">Print / Save PDF</button>
-           <button onclick="window.close()" style="padding: 12px 24px; font-size: 14px; cursor: pointer; border: 1px solid #cbd5e1; background: #fff; color: #0f172a; border-radius: 8px; font-weight: bold;">Close Tab</button>
-         </div>
-        </div>
-        <script>
-          window.onload = function() {
-          setTimeout(function() {
-            window.print();
-          }, 500);
-          };
-        </script>
-      </body>
-    </html>
-  `;
-  
-  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-  const url = window.URL.createObjectURL(blob);
-  const printWindow = window.open(url, '_blank');
-  
-  if (!printWindow) {
-    window.alert('Please allow popups to download your ticket.');
-  }
-}
-
-function downloadReportPDF({ events, admins, tasks, revenue }) {
-  const published = events.filter((e) => e.status === 'Published').length;
-  const completed = events.filter((e) => e.status === 'Completed').length;
-  const planning = events.filter((e) => e.status === 'Planning').length;
-  const soldOut = events.filter((e) => e.status === 'Sold out').length;
-
-  const totalCapacity = events.reduce((s, e) => s + Number(e.totalCapacity || 0), 0);
-  const totalSold = events.reduce((s, e) => s + Number(e.ticketsSold || 0), 0);
-  const fillRate = totalCapacity > 0 ? Math.round((totalSold / totalCapacity) * 100) : 0;
-  const completedTasks = tasks.filter((t) => t.status === 'Completed').length;
-
-  const topEvents = [...events].sort((a, b) => Number(b.ticketsSold || 0) - Number(a.ticketsSold || 0)).slice(0, 5);
-
-  const html = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <title>Organization Performance Report</title>
-        <style>
-          body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #0f172a; padding: 40px; margin: 0; background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          .container { max-width: 800px; margin: 0 auto; }
-          .header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #e2e8f0; padding-bottom: 20px; margin-bottom: 30px; }
-          .header h1 { margin: 0 0 8px 0; font-size: 28px; letter-spacing: -0.5px; }
-          .header p { margin: 0; color: #64748b; font-size: 14px; }
-          .brand { font-size: 24px; font-weight: 800; color: #2563eb; letter-spacing: -1px; }
-          .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 40px; }
-          .metric { background: #f8fafc; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0; }
-          .metric span { display: block; font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; font-weight: bold; }
-          .metric strong { display: block; font-size: 24px; color: #0f172a; }
-          h2 { font-size: 16px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px; margin-top: 40px; margin-bottom: 16px; text-transform: uppercase; letter-spacing: 1px; color: #334155; }
-          table { width: 100%; border-collapse: collapse; margin-bottom: 30px; font-size: 13px; }
-          th, td { text-align: left; padding: 12px 8px; border-bottom: 1px solid #e2e8f0; }
-          th { color: #64748b; font-weight: bold; }
-          .footer { margin-top: 60px; font-size: 12px; color: #94a3b8; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 20px; }
-          @media print {
-            body { padding: 0; }
-            .no-print { display: none !important; }
-          }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="no-print" style="text-align: right; margin-bottom: 20px;">
-            <button onclick="window.print()" style="padding: 10px 20px; background: #2563eb; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px;">Print / Save PDF</button>
-            <button onclick="window.close()" style="padding: 10px 20px; background: #fff; color: #0f172a; border: 1px solid #cbd5e1; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px; margin-left: 8px;">Close Tab</button>
-          </div>
-          
-          <div class="header">
-            <div>
-              <h1>Performance Report</h1>
-              <p>Generated on ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
-            </div>
-            <div class="brand">Lumina.</div>
-          </div>
-
-          <div class="grid">
-            <div class="metric"><span>Total Events</span><strong>${events.length}</strong></div>
-            <div class="metric"><span>Total Revenue</span><strong>${formatCurrency(revenue)}</strong></div>
-            <div class="metric"><span>Avg Fill Rate</span><strong>${fillRate}%</strong></div>
-            <div class="metric"><span>Tasks Done</span><strong>${completedTasks}/${tasks.length}</strong></div>
-          </div>
-
-          <h2>Event Status Breakdown</h2>
-          <table>
-            <thead><tr><th>Status</th><th>Count</th><th>% of Total</th></tr></thead>
-            <tbody>
-              <tr><td>Published</td><td>${published}</td><td>${events.length ? Math.round((published/events.length)*100) : 0}%</td></tr>
-              <tr><td>Completed</td><td>${completed}</td><td>${events.length ? Math.round((completed/events.length)*100) : 0}%</td></tr>
-              <tr><td>Planning</td><td>${planning}</td><td>${events.length ? Math.round((planning/events.length)*100) : 0}%</td></tr>
-              <tr><td>Sold Out</td><td>${soldOut}</td><td>${events.length ? Math.round((soldOut/events.length)*100) : 0}%</td></tr>
-            </tbody>
-          </table>
-
-          <h2>Top Events by Attendance</h2>
-          <table>
-            <thead><tr><th>Event Title</th><th>Date</th><th>Tickets Sold</th><th>Revenue</th></tr></thead>
-            <tbody>
-              ${topEvents.length > 0 ? topEvents.map(e => `<tr><td><strong>${e.title}</strong></td><td>${formatDate(e.date)}</td><td>${e.ticketsSold || 0} / ${e.totalCapacity || 'Open'}</td><td>${formatCurrency(Number(e.ticketPrice || 0) * Number(e.ticketsSold || 0))}</td></tr>`).join('') : '<tr><td colspan="4" style="text-align: center; color: #64748b;">No events data available</td></tr>'}
-            </tbody>
-          </table>
-
-          <h2>Admin Productivity</h2>
-          <table>
-            <thead><tr><th>Admin Name</th><th>Role</th><th>Completed Tasks</th><th>Total Assigned</th></tr></thead>
-            <tbody>
-              ${admins.length > 0 ? admins.map(a => `<tr><td><strong>${a.name}</strong></td><td>${a.orgRole || 'admin'}</td><td>${a.completed || 0}</td><td>${a.tasks || 0}</td></tr>`).join('') : '<tr><td colspan="4" style="text-align: center; color: #64748b;">No admin data available</td></tr>'}
-            </tbody>
-          </table>
-
-          <div class="footer">Confidential & Proprietary. Generated securely by Lumina Events.</div>
-        </div>
-        <script>window.onload = function() { setTimeout(function() { window.print(); }, 500); };</script>
-      </body>
-    </html>
-  `;
-  
-  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-  const url = window.URL.createObjectURL(blob);
-  const printWindow = window.open(url, '_blank');
-  
-  if (!printWindow) {
-    window.alert('Please allow popups to download your report.');
-  }
 }
 
 export default App;
